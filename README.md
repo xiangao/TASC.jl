@@ -35,7 +35,11 @@ att = mean(pred.effect[(T0 + 1):end])
 
 ## Documentation
 
-The package includes Documenter.jl vignettes:
+Documentation and vignettes are published at:
+
+https://xiangao.github.io/TASC.jl/
+
+To build them locally:
 
 ```bash
 julia --project=docs docs/make.jl
