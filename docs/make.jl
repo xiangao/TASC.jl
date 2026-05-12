@@ -1,5 +1,7 @@
 using Pkg
 
+ENV["GKSwstype"] = "100"
+
 Pkg.develop(PackageSpec(path = joinpath(@__DIR__, "..")))
 Pkg.instantiate()
 

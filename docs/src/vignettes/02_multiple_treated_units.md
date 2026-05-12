@@ -35,3 +35,23 @@ overall_att = mean(unit_att)
 ```
 
 Post-treatment donor observations remain available to update the latent state. Only the treated rows are treated as missing after `T0`.
+
+The plotting recipe averages over the treated rows when `treated_rows` contains more than one unit:
+
+```@example multiple_treated
+using Plots
+
+plt = plot(
+    tasc_plot(model, Y);
+    ci = false,
+    show_effect = true,
+    title = "Average treated path",
+    xlabel = "Time",
+    ylabel = "Outcome",
+)
+
+savefig(plt, "multiple-treated-tasc.svg") # hide
+nothing # hide
+```
+
+![](multiple-treated-tasc.svg)

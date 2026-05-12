@@ -57,6 +57,7 @@ using Plots
 plt = plot(
     tasc_plot(model, Y);
     ci = true,
+    show_effect = true,
     title = "TASC counterfactual",
     xlabel = "Time",
     ylabel = "Outcome",
