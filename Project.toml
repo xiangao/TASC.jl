@@ -1,20 +1,27 @@
 name = "TASC"
 uuid = "73a9b58f-6f61-4b9a-9b59-c35b7b9e82c6"
-authors = ["xao"]
 version = "0.1.0"
+authors = ["xao"]
 
 [deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+SynthDiD = "6933d2b0-70b5-4b05-939b-4536f4ca9999"
+
+[compat]
+CSV = "0.10.16"
+CairoMakie = "0.15.10"
+DataFrames = "1.8.2"
+RecipesBase = "1"
+julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-
-[compat]
-RecipesBase = "1"
-julia = "1.10"
