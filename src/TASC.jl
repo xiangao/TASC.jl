@@ -32,7 +32,6 @@ export StateSpaceParams,
     gen_A,
     gen_H,
     gen_dirichlet_params,
-    gen_dirchelet_params,
     generate_model_data,
     generate_multiple_layers,
     data_flatten,
@@ -122,7 +121,7 @@ function _cov_from_samples(X::AbstractMatrix{<:Real}; floor::Float64=1e-6)
     return _sym((Xc * Xc') / (n - 1) + floor * I)
 end
 
-function _pca_initialize(Y::AbstractMatrix{<:Real}, d::Int)
+function _pca_initialize(Y::AbstractMatrix{<:Real}, d::Int, rng::AbstractRNG)
     N, T = size(Y)
     d <= 0 && throw(ArgumentError("d must be positive"))
 
@@ -137,7 +136,6 @@ function _pca_initialize(Y::AbstractMatrix{<:Real}, d::Int)
         X[1:k, :] = F.Vt[1:k, :]
     end
     if d > k
-        rng = MersenneTwister(1)
         H[:, (k + 1):d] .= 0.01 .* randn(rng, N, d - k)
         X[(k + 1):d, :] .= 0.01 .* randn(rng, d - k, T)
     end
@@ -179,7 +177,7 @@ function _initialize_params(
     N = size(Y, 1)
     rng = seed === nothing ? Random.default_rng() : MersenneTwister(seed)
     if init == :pca
-        return _pca_initialize(Y, d)
+        return _pca_initialize(Y, d, rng)
     elseif init == :naive
         A = Matrix{Float64}(I, d, d)
         H = randn(rng, N, d)
@@ -234,6 +232,8 @@ function _kalman_filter(
 
     ll = 0.0
     log2pi = log(2pi)
+    obs_all  = collect(1:N)
+    obs_post = mask_post_target ? _post_observed_rows(N, treated_rows) : obs_all
 
     for t in 1:T_use
         mp = A * m_filt[:, t]
@@ -241,7 +241,7 @@ function _kalman_filter(
         m_pred[:, t] = mp
         P_pred[:, :, t] = Pp
 
-        obs = (mask_post_target && t > T0) ? _post_observed_rows(N, treated_rows) : collect(1:N)
+        obs = (mask_post_target && t > T0) ? obs_post : obs_all
         yt = Vector{Float64}(Y[obs, t])
         Ht = H[obs, :]
         Rt = R[obs, obs]
@@ -419,28 +419,35 @@ function fit_tasc(
     end
 
     Yfull = Matrix{Float64}(Y)
-    for iter in 1:n_post
-        filter = _kalman_filter(params, Yfull; T_use=T, T0=T0, mask_post_target=true, treated_rows=treated_rows)
-        smooth = _rts_smoother(params, filter)
-        fitted = params.H * smooth.m_smooth[:, 2:(T + 1)]
-        Yaug = copy(Yfull)
-        Yaug[Int.(treated_rows), (T0 + 1):T] .= fitted[Int.(treated_rows), (T0 + 1):T]
-        newparams = _m_step(Yaug, smooth; q_diag=q_diag, r_diag=r_diag, floor=require_thresh ? thresh : 1e-6)
-        if !learn_q
-            newparams = StateSpaceParams(newparams.A, newparams.H, params.Q, newparams.R, newparams.m0, newparams.P0)
-        end
-        if !learn_r
-            newparams = StateSpaceParams(newparams.A, newparams.H, newparams.Q, params.R, newparams.m0, newparams.P0)
-        end
-        delta = _params_delta(newparams, params)
-        params = newparams
-        iterations += 1
-        ll = filter.loglikelihood
-        if delta <= tol
-            converged = true
-            break
+    if n_post > 0
+        # Reset convergence: the post-intervention loop is a separate phase;
+        # pre-EM convergence does not imply post-EM convergence.
+        converged = false
+        for iter in 1:n_post
+            filter = _kalman_filter(params, Yfull; T_use=T, T0=T0, mask_post_target=true, treated_rows=treated_rows)
+            smooth = _rts_smoother(params, filter)
+            fitted = params.H * smooth.m_smooth[:, 2:(T + 1)]
+            Yaug = copy(Yfull)
+            Yaug[Int.(treated_rows), (T0 + 1):T] .= fitted[Int.(treated_rows), (T0 + 1):T]
+            newparams = _m_step(Yaug, smooth; q_diag=q_diag, r_diag=r_diag, floor=require_thresh ? thresh : 1e-6)
+            if !learn_q
+                newparams = StateSpaceParams(newparams.A, newparams.H, params.Q, newparams.R, newparams.m0, newparams.P0)
+            end
+            if !learn_r
+                newparams = StateSpaceParams(newparams.A, newparams.H, newparams.Q, params.R, newparams.m0, newparams.P0)
+            end
+            delta = _params_delta(newparams, params)
+            params = newparams
+            iterations += 1
+            ll = filter.loglikelihood
+            if delta <= tol
+                converged = true
+                break
+            end
         end
     end
+
+    converged || @warn "TASC EM did not converge after $iterations iterations; try increasing n_em$(n_post > 0 ? "/n_post" : "") or loosening tol."
 
     final_filter = _kalman_filter(params, Ypre; T_use=T0, T0=T0, mask_post_target=false)
     return TASCResult(params, T0, d, sort(unique(Int.(treated_rows))), iterations, converged, final_filter.loglikelihood)
@@ -496,7 +503,7 @@ function predict_post_intervention(model::TASCResult, Y::AbstractMatrix{<:Real})
     T = size(Y, 2)
     x = params.A * presmooth.m_smooth[:, model.T0 + 1]
     out = zeros(Float64, length(model.treated_rows), T - model.T0)
-    for (j, t) in enumerate((model.T0 + 1):T)
+    for j in 1:(T - model.T0)
         j > 1 && (x = params.A * x)
         out[:, j] = params.H[model.treated_rows, :] * x
     end
@@ -754,14 +761,18 @@ function _lasso_cd(X::Matrix{Float64}, y::Vector{Float64}, λ::Float64; maxiter:
     p = size(X, 2)
     β = zeros(Float64, p)
     xnorm = vec(sum(abs2, X; dims=1))
+    r = copy(y)  # running residual: y - X*β; starts as y since β = 0
     for _ in 1:maxiter
-        old = copy(β)
+        max_change = 0.0
         for j in 1:p
-            r = y - X * β + X[:, j] * β[j]
+            r .+= X[:, j] .* β[j]        # restore partial residual (exclude col j)
             ρ = dot(X[:, j], r)
-            β[j] = xnorm[j] <= eps(Float64) ? 0.0 : _soft_threshold(ρ, λ) / xnorm[j]
+            β_new = xnorm[j] <= eps(Float64) ? 0.0 : _soft_threshold(ρ, λ) / xnorm[j]
+            max_change = max(max_change, abs(β_new - β[j]))
+            r .-= X[:, j] .* β_new        # update residual with new β[j]
+            β[j] = β_new
         end
-        norm(β - old) <= tol * (1 + norm(old)) && break
+        max_change <= tol * (1 + norm(β)) && break
     end
     return β
 end
@@ -776,14 +787,22 @@ end
 
 function _simplex_regression(X::Matrix{Float64}, y::Vector{Float64}; fit_intercept::Bool=true, maxiter::Int=20_000, tol::Float64=1e-9)
     Xfit = fit_intercept ? _add_intercept(X) : X
+    n_coef = size(X, 2)
     p = size(Xfit, 2)
-    β = fill(1 / p, p)
+    # Initialise: zero intercept, uniform weights on simplex
+    β = fit_intercept ? vcat(0.0, fill(1.0 / n_coef, n_coef)) : fill(1.0 / p, p)
     L = opnorm(Xfit)^2
     η = 1 / max(L, eps(Float64))
     for _ in 1:maxiter
         old = copy(β)
         grad = Xfit' * (Xfit * β - y)
-        β = _project_simplex(β - η * grad)
+        if fit_intercept
+            # Intercept is unconstrained; only donor weights are simplex-projected.
+            β[1] -= η * grad[1]
+            β[2:end] = _project_simplex(β[2:end] - η * grad[2:end])
+        else
+            β = _project_simplex(β - η * grad)
+        end
         norm(β - old) <= tol * (1 + norm(old)) && break
     end
     if fit_intercept
@@ -1004,10 +1023,13 @@ function generate_multiple_layers(;
     burn_time::Int=3,
 )
     rng = _rng(seed)
+    # Each layer gets a distinct derived seed so parameters differ across layers.
     theta_list = [
         gen_dirichlet_params(d=d_true, N=N, noise_min_q=noise_min, noise_max_q=noise_max,
-            noise_min_r=noise_min, noise_max_r=noise_max, seed=seed, Q_diag=false, R_diag=false)
-        for _ in 1:k
+            noise_min_r=noise_min, noise_max_r=noise_max,
+            seed=seed === nothing ? nothing : seed + layer - 1,
+            Q_diag=false, R_diag=false)
+        for layer in 1:k
     ]
     mb = rand(rng, d_true)
     Pb = gen_cov(d_true; noise_min=noise_min, noise_max=noise_max, seed=seed, diag=false)
@@ -1137,7 +1159,8 @@ function generate_new_sine_dataset(
         a = alpha === nothing ? rand(rng, BetaLike(2, 2)) : alpha[i]
         o = omega === nothing ? rand(rng) * (high - low) + low : omega[i]
         p = phi === nothing ? randn(rng) : phi[i]
-        y = generate_sine_wave(a, o, p, 0, floor(Int, num_time * 1.2); seed=seed)
+        wave_seed = seed === nothing ? nothing : seed + i
+        y = generate_sine_wave(a, o, p, 0, floor(Int, num_time * 1.2); seed=wave_seed)
         basis[i, :] = y[(floor(Int, 0.2 * num_time) + 1):end]
     end
     weights = rand(rng, num_samples, num_signals)
@@ -1159,7 +1182,9 @@ function _generate_sine_dataset(num_samples, num_time, noise_level, num_signals;
         a = rand(rng, BetaLike(beta[1], beta[2]))
         o = rand(rng) * (high - low) + low
         p = randn(rng)
-        y = generate_sine_wave(a, o, p, 0, floor(Int, num_time * 1.2); seed=seed)
+        # Derive a distinct seed per basis function so noise sequences differ.
+        wave_seed = seed === nothing ? nothing : seed + i
+        y = generate_sine_wave(a, o, p, 0, floor(Int, num_time * 1.2); seed=wave_seed)
         basis[i, :] = y[(floor(Int, 0.2 * num_time) + 1):end]
     end
     final = rand(rng, num_samples, num_signals) * basis
