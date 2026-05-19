@@ -25,6 +25,7 @@ jobs:
         run: |
           julia --project=docs -e '
             using Pkg
+            rm(joinpath(pwd(), "docs", "Manifest.toml"); force = true)
             Pkg.develop(PackageSpec(url = "https://github.com/xiangao/SynthDiD.jl"))
             Pkg.develop(PackageSpec(path = pwd()))
             Pkg.instantiate()
