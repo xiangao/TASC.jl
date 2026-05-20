@@ -1,6 +1,9 @@
 # TASC.jl
 
-`TASC.jl` implements Time-Aware Synthetic Control for panel data. It fits a low-rank linear Gaussian state-space model on pre-treatment outcomes, masks treated outcomes after treatment, and uses Kalman filtering plus Rauch-Tung-Striebel smoothing to estimate untreated counterfactual paths.
+`TASC.jl` implements time-aware synthetic control for panel data. It fits a
+low-rank linear Gaussian state-space model on the pre-treatment outcomes, masks
+the treated outcomes after treatment, and then uses Kalman filtering and
+Rauch-Tung-Striebel smoothing to estimate the untreated path.
 
 ## Installation
 
