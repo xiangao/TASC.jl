@@ -28,9 +28,11 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Develop unregistered dependencies
         run: |
-          julia -e '
+          julia --project=. -e '
             using Pkg
             Pkg.develop(PackageSpec(url = "https://github.com/xiangao/SynthDiD.jl"))
+            Pkg.resolve()
+            Pkg.instantiate()
           '
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
