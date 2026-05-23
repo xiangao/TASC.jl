@@ -14,9 +14,9 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 SynthDiD = "6933d2b0-70b5-4b05-939b-4536f4ca9999"
 
 [compat]
-CSV = "0.10.16"
-CairoMakie = "0.15.10"
-DataFrames = "1.8.2"
+CSV = "0.10"
+CairoMakie = "0.14, 0.15"
+DataFrames = "1"
 RecipesBase = "1"
 julia = "1.10"
 
